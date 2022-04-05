@@ -86,7 +86,7 @@
        :credited-account credited-account
        :transfered transfer})
     (catch Exception e
-      (throw (ex-info "Account cannot be debited."
+      (throw (ex-info "Money cannot be transferred."
                       {:type :illegal-operation
                        :action :transfer-money
                        :from-account from-account
