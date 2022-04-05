@@ -1,7 +1,7 @@
 (ns clj-ddd-example
-  "Clojure implementation of DDD, based on example here: *
-  http://blog.sapiensworks.com/post/2016/07/14/DDD-Aggregate-Decoded-2 *
-  http://blog.sapiensworks.com/post/2016/08/19/DDD-Application-Services-Explained
+  "Clojure implementation of DDD, based on example here:
+  * http://blog.sapiensworks.com/post/2016/07/14/DDD-Aggregate-Decoded-2
+  * http://blog.sapiensworks.com/post/2016/08/19/DDD-Application-Services-Explained
 
   This namespace contains our Application Service.
 
