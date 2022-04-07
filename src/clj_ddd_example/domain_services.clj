@@ -51,25 +51,24 @@
   Domain services can make use of other domain services as well as the domain
   model."
   (:require [clojure.spec.alpha :as s]
-            [clojure.spec.gen.alpha :as gen]
             [clj-ddd-example.domain-model :as dm]))
 
 
-(s/def :transfer-money/debited-account :account/account)
-(s/def :transfer-money/credited-account :account/account)
-(s/def :transfer-money/transfered :transfer/transfer)
-(s/fdef transfer-money
-  :args (s/cat :transfer-number :transfer/number
-               :from-account :account/account
-               :to-account :account/account
-               :amount :amount/amount)
-  :ret (s/keys :req-un [:transfer-money/debited-account
-                        :transfer-money/credited-account
-                        :transfer-money/transfered]))
+(s/def :transfer-money/transfered-money
+  (s/keys :req-un [:account/debited-account
+                   :account/credited-account
+                   :transfer/posted-transfer]))
+
+(defn- make-transfered-money-event
+  [debited-account credited-account posted-transfer]
+  (s/assert :transfer-money/transfered-money
+            {:debited-account debited-account
+             :credited-account credited-account
+             :posted-transfer posted-transfer}))
 
 (defn transfer-money
   "Returns if money can be transferred from one account to another for some
-  specific amount, if it can, it'll return the domain events describing how to
+  specific amount, if it can, it'll return the domain event describing how to
   make the valid changes that respect the domain rules and invariants of
   transferring money. Otherwise throws an exception about the transfer not being
   possible."
@@ -79,12 +78,12 @@
           credit (dm/make-credit (:number to-account) amount)
           debited-account (dm/debit-account from-account debit)
           credited-account (dm/credit-account to-account credit)
-          transfer (dm/make-transfer transfer-number
-                                     debit
-                                     credit)]
-      {:debited-account debited-account
-       :credited-account credited-account
-       :transfered transfer})
+          posted-transfer (dm/post-transfer transfer-number
+                                            debit
+                                            credit)]
+      (make-transfered-money-event debited-account
+                                   credited-account
+                                   posted-transfer))
     (catch Exception e
       (throw (ex-info "Money cannot be transferred."
                       {:type :illegal-operation

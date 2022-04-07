@@ -148,8 +148,7 @@
   part of the functional core, having dependencies only on the domain model
   itself and nothing else. Feel free to replace spec with some other Clojure
   predicate data validation lib, like Malli for example as well."
-  (:require [clojure.spec.alpha :as s]
-            [clojure.spec.gen.alpha :as gen]))
+  (:require [clojure.spec.alpha :as s]))
 
 
 ;;;;;;;;;;;;;;;;;;;;
@@ -225,30 +224,64 @@
             {:number account-number
              :balance balance}))
 
+(s/def :debited-account/event #{:debited-account})
+
+(s/def :debited-account/amount-value :amount/value)
+
+(s/def :account/debited-account
+  (s/keys :req-un [:debited-account/event
+                   :account/number
+                   :debited-account/amount-value]))
+
+(defn- make-debited-account-event
+  [account-number amount-value]
+  (s/assert :account/debited-account
+            {:event :debited-account
+             :number account-number
+             :amount-value amount-value}))
+
 (defn debit-account
-  "Returns the account with the debit applied or throws if we can't debit."
+  "Returns a debited-account domain event describing the valid debit state
+   change that has happened to the Account, so that it can be applied to our app
+   state eventually."
   [account debit]
   (if
       (and
        (= (-> account :balance :currency) (-> debit :amount :currency))
        (= (-> account :number) (-> debit :number))
-       (pos? (- (-> account :balance :value) (-> debit :amount :value))))
-    (s/assert :account/account
-              (update account :balance update :value - (-> debit :amount :value)))
+       (>= (- (-> account :balance :value) (-> debit :amount :value)) 0))
+    (make-debited-account-event (-> account :number) (-> debit :amount :value))
     (throw (ex-info "Can't debit account" {:type :illegal-operation
                                            :action :debit-account
                                            :account account
                                            :debit debit}))))
 
+(s/def :credited-account/event #{:credited-account})
+
+(s/def :credited-account/amount-value :amount/value)
+
+(s/def :account/credited-account
+  (s/keys :req-un [:credited-account/event
+                   :account/number
+                   :credited-account/amount-value]))
+
+(defn- make-credited-account-event
+  [account-number amount-value]
+  (s/assert :account/credited-account
+            {:event :credited-account
+             :number account-number
+             :amount-value amount-value}))
+
 (defn credit-account
-  "Returns the account with the credit applied or throws if we can't credit."
+  "Returns a credited-account domain event describing the valid credit state
+   change that has happened to the Account, so that it can be applied to our app
+   state eventually."
   [account credit]
   (if
       (and
        (= (-> account :balance :currency) (-> credit :amount :currency))
        (= (-> account :number) (-> credit :number)))
-    (s/assert :account/account
-              (update account :balance update :value + (-> credit :amount :value)))
+    (make-credited-account-event (-> account :number) (-> credit :amount :value))
     (throw (ex-info "Can't credit account" {:type :illegal-operation
                                             :account account
                                             :credit credit}))))
@@ -324,6 +357,25 @@
              :debit debit
              :credit credit
              :creation-date (java.util.Date.)}))
+
+(s/def :posted-transfer/event #{:posted-transfer})
+
+(s/def :transfer/posted-transfer
+  (s/keys :req-un [:posted-transfer/event
+                   :transfer/transfer]))
+
+(defn- make-posted-transfer-event
+  [transfer-number debit credit]
+  (s/assert :transfer/posted-transfer
+            {:event :posted-transfer
+             :transfer (make-transfer transfer-number debit credit)}))
+
+(defn post-transfer
+  "Returns a posted-transfer domain event describing the valid posted state
+   change that has happened to the Transfer, so that it can be applied to our
+   app state eventually."
+  [transfer-number debit credit]
+  (make-posted-transfer-event transfer-number debit credit))
 
 ;;; Transfer ;;;
 ;;;;;;;;;;;;;;;;

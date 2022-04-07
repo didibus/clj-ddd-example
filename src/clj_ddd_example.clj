@@ -56,18 +56,15 @@
           to-account (repository/get-account to)
           domain-amount (dm/make-amount amount currency)
           transfered-money (ds/transfer-money transfer-number from-account to-account domain-amount)]
-      (repository/commit-transfer
-       (:transfered transfered-money)
-       (:debited-account transfered-money)
-       (:credited-account transfered-money))
+      (repository/commit-transfered-money-event transfered-money)
       {:status :done
        :transfered [(-> domain-amount :value) (-> domain-amount :currency)]
        :debited-account (-> transfered-money :debited-account :number)
-       :debited-account-balance [(-> transfered-money :debited-account :balance :value)
-                                 (-> transfered-money :debited-account :balance :currency)]
+       :debited-account-amount [(-> transfered-money :posted-transfer :transfer :debit :amount :value)
+                                (-> transfered-money :posted-transfer :transfer :debit :amount :currency)]
        :credited-account (-> transfered-money :credited-account :number)
-       :credited-account-balance [(-> transfered-money :credited-account :balance :value)
-                                  (-> transfered-money :credited-account :balance :currency)]})
+       :credited-account-amount [(-> transfered-money :posted-transfer :transfer :credit :amount :value)
+                                 (-> transfered-money :posted-transfer :transfer :credit :amount :currency)]})
     (catch Exception e
       {:status :error
        :transfer-number transfer-number
@@ -77,9 +74,58 @@
        :currency currency
        :error e})))
 
+;; Evaluate this to reset the datastore state to have two accounts, account
+;; 125746398235 with 1000$ and 234512768893 with 0$.
+
+#_(alter-var-root
+   #'repository/datastore
+   (fn[_]
+     (atom {:account-table #{["125746398235" 1000 :usd]
+                             ["234512768893" 0 :usd]}
+            :transfer-table #{}})))
+
+;; Evaluate this to transfer some money
+
 #_(transfer-money
    :transfer-number "ABC12345678"
    :from "125746398235"
    :to "234512768893"
    :amount 200
    :currency :usd)
+
+;; Evaluate this to run two thousand 1$ transfers in parallel to test the
+;; eventual consistency of our implementation.
+
+#_(->> (for [i (range 2000)]
+         (future
+           (transfer-money
+            :transfer-number "ABC12345678"
+            :from "125746398235"
+            :to "234512768893"
+            :amount 1
+            :currency :usd)))
+       (run! deref))
+
+;; You'll observe that while we never double spend, in that there will never be
+;; more than 1000$ dollar in the accounts, (assuming the initial accounts
+;; started with 1000$ total) an account can go into a negative balance. This is
+;; the downside of an eventually consistent design, we can't 100% guarantee that
+;; a transfer can't happen if there's not enough balance in the debiting
+;; account, because we don't have read-after-write guarantees, so it is only
+;; best effort. That said, we assume that the business can handle this, such as
+;; having the customer go in overdraft, or charging them a fee for having gone
+;; below their balance, which both can cover the cost to the bank of having to
+;; cover a transfer out of pocket. The flip side to the eventual consistency, is
+;; that it can scale really well to large volumes, you can imagine having each
+;; state changing event published in a Kafka stream, where they get committed
+;; one by one. The Kafka stream allows you to scale your writes drastically,
+;; buffering them for the slower database writes, say a MySQL instance. By
+;; designing all your use cases also to accept eventual consistency, you also
+;; inherently handle a situation with read replicas that would not always all
+;; reflect the latest state. That said, this isn't always the best thing for
+;; your users, so you need to evaluate the trade offs.
+
+;; Evaluate these to see the current state of our datastore in-memory tables
+#_(:account-table @@#'repository/datastore)
+
+#_(:transfer-table @@#'repository/datastore)
