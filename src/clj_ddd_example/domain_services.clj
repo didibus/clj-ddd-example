@@ -50,21 +50,40 @@
 
   Domain services can make use of other domain services as well as the domain
   model."
-  (:require [clojure.spec.alpha :as s]
-            [clj-ddd-example.domain-model :as dm]))
+  (:require [clojure.spec.alpha :as s]))
 
+(defn- debit-account
+  "Returns a debit-account domain event describing the valid debit state
+   change that has happened to the Account, so that it can be applied to our app
+   state eventually."
+  [account amount]
+  (s/assert :account/account account)
+  (s/assert :amount/amount amount)
+  (if (and
+       (= (:account/currency account) (:amount/currency amount))
+       (>= (- (:account/balance account) (:amount/value amount)) 0))
+    {:account/number (:account/number account)
+     :amount/value (:amount/value amount)
+     :amount/currency (:amount/currency amount)}
+    (throw (ex-info "Can't debit account" {:type :illegal-operation
+                                           :action :debit-account
+                                           :account account
+                                           :amount amount}))))
 
-(s/def :transfer-money/transfered-money
-  (s/keys :req-un [:account/debited-account
-                   :account/credited-account
-                   :transfer/posted-transfer]))
-
-(defn- make-transfered-money-event
-  [debited-account credited-account posted-transfer]
-  (s/assert :transfer-money/transfered-money
-            {:debited-account debited-account
-             :credited-account credited-account
-             :posted-transfer posted-transfer}))
+(defn- credit-account
+  "Returns a credit-account domain event describing the valid credit state
+   change that has happened to the Account, so that it can be applied to our app
+   state eventually."
+  [account amount]
+  (s/assert :account/account account)
+  (s/assert :amount/amount amount)
+  (if (= (:account/currency account) (:amount/currency amount))
+    {:account/number (:account/number account)
+     :amount/value (:amount/value amount)
+     :amount/currency (:amount/currency amount)}
+    (throw (ex-info "Can't credit account" {:type :illegal-operation
+                                            :account account
+                                            :amount amount}))))
 
 (defn transfer-money
   "Returns if money can be transferred from one account to another for some
@@ -73,17 +92,20 @@
   transferring money. Otherwise throws an exception about the transfer not being
   possible."
   [transfer-number from-account to-account amount]
+  (s/assert :account/account from-account)
+  (s/assert :account/account to-account)
+  (s/assert :amount/amount amount)
   (try
-    (let [debit (dm/make-debit (:number from-account) amount)
-          credit (dm/make-credit (:number to-account) amount)
-          debited-account (dm/debit-account from-account debit)
-          credited-account (dm/credit-account to-account credit)
-          posted-transfer (dm/post-transfer transfer-number
-                                            debit
-                                            credit)]
-      (make-transfered-money-event debited-account
-                                   credited-account
-                                   posted-transfer))
+    (let [debit-account (debit-account from-account amount)
+          credit-account (credit-account to-account amount)]
+      ;; Returns a posted-transfer domain event describing the valid posted state
+      ;; change that has happened to the Transfer, so that it can be applied to our
+      ;; app state eventually.
+      {:transfer/id (random-uuid)
+       :transfer/number transfer-number
+       :account/debit debit-account
+       :account/credit credit-account
+       :transfer/creation-date (java.util.Date.)})
     (catch Exception e
       (throw (ex-info "Money cannot be transferred."
                       {:type :illegal-operation
@@ -92,3 +114,19 @@
                        :to-account to-account
                        :amount amount}
                       e)))))
+
+(defn apply-debit-account
+  "Returns an updated account of the given account with the debit described
+   by debit-account-event applied to it."
+  [account debit-account]
+  (s/assert :account/account account)
+  (s/assert :account/debit debit-account)
+  (update account :account/balance - (:amount/value debit-account)))
+
+(defn apply-credit-account
+  "Returns an updated account of the given account with the credit described
+   by credit-account-event applied to it."
+  [account credit-account]
+  (s/assert :account/account account)
+  (s/assert :account/credit credit-account)
+  (update account :account/balance + (:amount/value credit-account)))

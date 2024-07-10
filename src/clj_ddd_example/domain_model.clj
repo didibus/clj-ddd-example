@@ -163,21 +163,14 @@
 ;;;;;;;;;;;;;;
 ;;; Amount ;;;
 
-(s/def :amount/currency
-  currency?)
+(s/def :amount/currency currency?)
 
 (s/def :amount/value
   (s/and number? pos?))
 
 (s/def :amount/amount
-  (s/keys :req-un [:amount/currency
-                   :amount/value]))
-
-(defn make-amount
-  [value currency]
-  (s/assert :amount/amount
-            {:currency currency
-             :value value}))
+  (s/keys :req [:amount/currency
+                :amount/value]))
 
 ;;; Amount ;;;
 ;;;;;;;;;;;;;;
@@ -186,21 +179,11 @@
 ;;;;;;;;;;;;;;;
 ;;; Balance ;;;
 
-(s/def :balance/value
+(s/def :account/balance
   number?)
 
-(s/def :balance/currency
+(s/def :account/currency
   currency?)
-
-(s/def :balance/balance
-  (s/keys :req-un [:balance/currency
-                   :balance/value]))
-
-(defn make-balance
-  [value currency]
-  (s/assert :balance/balance
-            {:currency currency
-             :value value}))
 
 ;;; Balance ;;;
 ;;;;;;;;;;;;;;;
@@ -215,76 +198,19 @@
     #(s/gen #{"273648898836" "111234871234" "998877324561"})))
 
 (s/def :account/account
-  (s/keys :req-un [:account/number
-                   :balance/balance]))
+  (s/keys :req [:account/number
+                :account/currency
+                :account/balance]))
 
-(defn make-account
-  [account-number balance]
-  (s/assert :account/account
-            {:number account-number
-             :balance balance}))
+(s/def :account/debit
+  (s/keys :req [:account/number
+                :amount/value
+                :amount/currency]))
 
-(s/def :debited-account/event #{:debited-account})
-
-(s/def :debited-account/amount-value :amount/value)
-
-(s/def :account/debited-account
-  (s/keys :req-un [:debited-account/event
-                   :account/number
-                   :debited-account/amount-value]))
-
-(defn- make-debited-account-event
-  [account-number amount-value]
-  (s/assert :account/debited-account
-            {:event :debited-account
-             :number account-number
-             :amount-value amount-value}))
-
-(defn debit-account
-  "Returns a debited-account domain event describing the valid debit state
-   change that has happened to the Account, so that it can be applied to our app
-   state eventually."
-  [account debit]
-  (if
-      (and
-       (= (-> account :balance :currency) (-> debit :amount :currency))
-       (= (-> account :number) (-> debit :number))
-       (>= (- (-> account :balance :value) (-> debit :amount :value)) 0))
-    (make-debited-account-event (-> account :number) (-> debit :amount :value))
-    (throw (ex-info "Can't debit account" {:type :illegal-operation
-                                           :action :debit-account
-                                           :account account
-                                           :debit debit}))))
-
-(s/def :credited-account/event #{:credited-account})
-
-(s/def :credited-account/amount-value :amount/value)
-
-(s/def :account/credited-account
-  (s/keys :req-un [:credited-account/event
-                   :account/number
-                   :credited-account/amount-value]))
-
-(defn- make-credited-account-event
-  [account-number amount-value]
-  (s/assert :account/credited-account
-            {:event :credited-account
-             :number account-number
-             :amount-value amount-value}))
-
-(defn credit-account
-  "Returns a credited-account domain event describing the valid credit state
-   change that has happened to the Account, so that it can be applied to our app
-   state eventually."
-  [account credit]
-  (if
-      (and
-       (= (-> account :balance :currency) (-> credit :amount :currency))
-       (= (-> account :number) (-> credit :number)))
-    (make-credited-account-event (-> account :number) (-> credit :amount :value))
-    (throw (ex-info "Can't credit account" {:type :illegal-operation
-                                            :account account
-                                            :credit credit}))))
+(s/def :account/credit
+  (s/keys :req [:account/number
+                :amount/value
+                :amount/currency]))
 
 ;;; Account ;;;
 ;;;;;;;;;;;;;;;
@@ -293,15 +219,6 @@
 ;;;;;;;;;;;;;
 ;;; Debit ;;;
 
-(s/def :debit/debit
-  (s/keys :req-un [:account/number
-                   :amount/amount]))
-
-(defn make-debit
-  [account-number amount]
-  (s/assert :debit/debit
-            {:number account-number
-             :amount amount}))
 
 ;;; Debit ;;;
 ;;;;;;;;;;;;;
@@ -309,16 +226,6 @@
 
 ;;;;;;;;;;;;;;
 ;;; Credit ;;;
-
-(s/def :credit/credit
-  (s/keys :req-un [:account/number
-                   :amount/amount]))
-
-(defn make-credit
-  [account-number amount]
-  (s/assert :credit/credit
-            {:number account-number
-             :amount amount}))
 
 ;;; Credit ;;;
 ;;;;;;;;;;;;;;
@@ -338,44 +245,17 @@
 (s/def :transfer/creation-date
   inst?)
 
-(s/def :transfer/transfer
-  (s/and
-   (s/keys :req-un [:transfer/id
-                    :transfer/number
-                    :debit/debit
-                    :credit/credit
-                    :transfer/creation-date])
-   (fn[{:keys [debit credit]}]
-     (and (= (:amount debit) (:amount credit))
-          (not= (:number debit) (:number credit))))))
-
-(defn make-transfer
-  [transfer-number debit credit]
-  (s/assert :transfer/transfer
-            {:id (random-uuid)
-             :number transfer-number
-             :debit debit
-             :credit credit
-             :creation-date (java.util.Date.)}))
-
-(s/def :posted-transfer/event #{:posted-transfer})
-
-(s/def :transfer/posted-transfer
-  (s/keys :req-un [:posted-transfer/event
-                   :transfer/transfer]))
-
-(defn- make-posted-transfer-event
-  [transfer-number debit credit]
-  (s/assert :transfer/posted-transfer
-            {:event :posted-transfer
-             :transfer (make-transfer transfer-number debit credit)}))
-
-(defn post-transfer
-  "Returns a posted-transfer domain event describing the valid posted state
-   change that has happened to the Transfer, so that it can be applied to our
-   app state eventually."
-  [transfer-number debit credit]
-  (make-posted-transfer-event transfer-number debit credit))
-
 ;;; Transfer ;;;
 ;;;;;;;;;;;;;;;;
+
+(s/def :transfer/transfer-money
+  (s/and
+   (s/keys :req [:account/debit
+                 :account/credit
+                 :transfer/id
+                 :transfer/number
+                 :transfer/creation-date])
+   (fn [{debit :account/debit
+         credit :account/credit}]
+     (and (= (select-keys debit [:amount/currency :amount/value]) (select-keys credit [:amount/currency :amount/value]))
+          (not= (:account/number debit) (:account/number credit))))))

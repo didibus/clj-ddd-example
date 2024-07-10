@@ -40,9 +40,9 @@
   changes, and use the domain model/services to perform the change that the
   application service would commit back using the repository. In that sense,
   Finder is read only, while Repository is write only with reads done as
-  necessary in order to write, but switching from one to the other is possible."
-  (:require [clj-ddd-example.domain-model :as dm]))
-
+  necessary in order to write, but switching from one to the other is possible." 
+  (:require [clj-ddd-example.domain-services :as ds]
+            [clojure.spec.alpha :as s]))
 
 (def ^:private datastore
   (atom {:account-table #{["125746398235" 1000 :usd]
@@ -51,26 +51,28 @@
 
 (defn- account->account-table-row
   [account]
-  [(-> account :number)
-   (-> account :balance :value)
-   (-> account :balance :currency)])
+  (s/assert :account/account account)
+  [(:account/number account)
+   (:account/balance account)
+   (:account/currency account)])
 
 (defn- account-table-row->account
   [account-table-row]
-  (dm/make-account
-   (nth account-table-row 0)
-   (dm/make-balance (nth account-table-row 1)
-                    (nth account-table-row 2))))
+  (let [[account-number value currency] account-table-row]
+    {:account/number account-number
+     :account/currency currency
+     :account/balance value}))
 
 (defn- transfer->transfer-table-row
   [transfer]
-  [(-> transfer :id)
-   (-> transfer :number)
-   (-> transfer :debit :number)
-   (-> transfer :credit :number)
-   (-> transfer :debit :amount :value)
-   (-> transfer :debit :amount :currency)
-   (-> transfer :creation-date)])
+  (s/assert :transfer/transfer-money transfer)
+  [(:transfer/id transfer)
+   (:transfer/number transfer)
+   (get-in transfer [:account/debit :account/number])
+   (get-in transfer [:account/credit :account/number])
+   (get-in transfer [:account/debit :amount/value])
+   (get-in transfer [:account/debit :amount/currency])
+   (:transfer/creation-date transfer)])
 
 (defn- get-account-row
   "Returns the DB specific account structure, not one from
@@ -80,20 +82,6 @@
    (fn[row] (when (= (first row) account-number) row))
    account-table))
 
-(defn- apply-debited-account-event
-  "Returns an updated account of the given account with the debit described
-   by debited-account-event applied to it."
-  [debited-account-event account]
-  (update-in account [:balance :value]
-             - (:amount-value debited-account-event)))
-
-(defn- apply-credited-account-event
-  "Returns an updated account of the given account with the credit described
-   by credited-account-event applied to it."
-  [credited-account-event account]
-  (update-in account [:balance :value]
-             + (:amount-value credited-account-event)))
-
 (defn get-account
   "Returns Account entity for the account identified by account-number,
    nil if there isn't one."
@@ -101,30 +89,28 @@
   (when-let [account-row (get-account-row (:account-table @datastore) account-number)]
     (account-table-row->account account-row)))
 
-(defn commit-transfered-money-event
+(defn commit-transfer-money
   "Commits to our app state a transfered-money domain event, this implies adding
    a transfer entry for the posted-transfer event created as part of the
    transfer, as well as updating the debited account and the credited account
-   with their new balance as described by the debited-account and
-   credited-account domain events."
-  [{:keys [posted-transfer debited-account credited-account] :as _transfered-money}]
+   with their new balance as described by the debit-account and
+   credit-account domain events."
+  [{credit-account :account/credit
+    debit-account :account/debit
+    :as transfer-money}]
+  (s/assert :transfer/transfer-money transfer-money)
   (swap! datastore
-         (fn[currentstore]
+         (fn [currentstore]
            (let [account-table (:account-table currentstore)
-                 debit-account-row (get-account-row account-table (-> debited-account :number))
-                 debit-account (account-table-row->account debit-account-row)
-                 credit-account-row (get-account-row account-table (-> credited-account :number))
-                 credit-account (account-table-row->account credit-account-row)
-                 new-debit-account-row (-> debited-account
-                                           (apply-debited-account-event debit-account)
-                                           (account->account-table-row))
-                 new-credit-account-row (-> credited-account
-                                            (apply-credited-account-event credit-account)
-                                            (account->account-table-row))
-                 transfer-row (transfer->transfer-table-row (:transfer posted-transfer))]
+                 from-account-row (get-account-row account-table (:account/number debit-account))
+                 to-account-row (get-account-row account-table (:account/number credit-account))
+
+                 from-account (account-table-row->account from-account-row)
+                 to-account (account-table-row->account to-account-row)
+
+                 from-account-updated (ds/apply-debit-account from-account debit-account)
+                 to-account-updated (ds/apply-credit-account to-account credit-account)]
              (-> currentstore
-                 (update :account-table disj debit-account-row)
-                 (update :account-table conj new-debit-account-row)
-                 (update :account-table disj credit-account-row)
-                 (update :account-table conj new-credit-account-row)
-                 (update :transfer-table conj transfer-row))))))
+                 (update :account-table disj from-account-row to-account-row)
+                 (update :account-table conj (account->account-table-row from-account-updated) (account->account-table-row to-account-updated))
+                 (update :transfer-table conj (transfer->transfer-table-row transfer-money)))))))

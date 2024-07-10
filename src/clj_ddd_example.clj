@@ -32,10 +32,11 @@
   must perform the necessary side-effects the use case demand, such as in our
   case updating our persistent state using the repository to update our
   datastore about the transfer of money that occurred."
-  (:require [clj-ddd-example.repository :as repository]
-            [clj-ddd-example.domain-model :as dm]
-            [clj-ddd-example.domain-services :as ds]))
+  (:require [clj-ddd-example.domain-services :as ds]
+            [clj-ddd-example.repository :as repository]
+            [clojure.spec.alpha :as s]))
 
+(s/check-asserts true)
 
 (defn transfer-money
   "Our first use case, transfer-money, can be used to transfer money from one
@@ -54,17 +55,12 @@
   (try
     (let [from-account (repository/get-account from)
           to-account (repository/get-account to)
-          domain-amount (dm/make-amount amount currency)
-          transfered-money (ds/transfer-money transfer-number from-account to-account domain-amount)]
-      (repository/commit-transfered-money-event transfered-money)
+          transfer-money (ds/transfer-money transfer-number from-account to-account {:amount/currency currency
+                                                                                     :amount/value amount})]
+      (repository/commit-transfer-money transfer-money)
       {:status :done
-       :transfered [(-> domain-amount :value) (-> domain-amount :currency)]
-       :debited-account (-> transfered-money :debited-account :number)
-       :debited-account-amount [(-> transfered-money :posted-transfer :transfer :debit :amount :value)
-                                (-> transfered-money :posted-transfer :transfer :debit :amount :currency)]
-       :credited-account (-> transfered-money :credited-account :number)
-       :credited-account-amount [(-> transfered-money :posted-transfer :transfer :credit :amount :value)
-                                 (-> transfered-money :posted-transfer :transfer :credit :amount :currency)]})
+       :transfered [amount currency]
+       :transfered-result transfer-money})
     (catch Exception e
       {:status :error
        :transfer-number transfer-number
@@ -86,12 +82,12 @@
 
 ;; Evaluate this to transfer some money
 
-#_(transfer-money
-   :transfer-number "ABC12345678"
-   :from "125746398235"
-   :to "234512768893"
-   :amount 200
-   :currency :usd)
+(transfer-money
+ :transfer-number "ABC12345678"
+ :from "125746398235"
+ :to "234512768893"
+ :amount 200
+ :currency :usd)
 
 ;; Evaluate this to run two thousand 1$ transfers in parallel to test the
 ;; eventual consistency of our implementation.
